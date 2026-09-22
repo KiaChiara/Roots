@@ -62,8 +62,8 @@ Then open the local URL shown in the terminal (usually `http://127.0.0.1:7860`).
 ## An open extension
 
 This work has an open, participatory companion — **Roots (Open) — 모두의 고향** — where
-anyone can pick their own country or city and see it become a sound map:
-👉 https://github.com/YOUR-USERNAME/roots-open
+anyone can pick their own country or a major korean city and see it become a sound map:
+https://github.com/KiaChiara/Roots-Open
 
 ## Author
 
