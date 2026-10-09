@@ -1,22 +1,22 @@
 """
-midi_to_visual.py — da un file MIDI genera i due file per la visualizzazione:
-  1) <nome>_score.json : la partitura (tempo, altezza, ampiezza, durata di ogni nota)
-  2) <nome>_audio.wav  : audio di lavoro sintetizzato
+midi_to_visual.py — from a MIDI file, generates the two files for the visualization:
+  1) <name>_score.json : the score (time, pitch, amplitude, duration of every note)
+  2) <name>_audio.wav  : synthesized working audio
 
-La batteria (tracce is_drum) viene sempre esclusa: non ha altezza intonata.
-Tutte le altre note vengono riportate cosi' come sono nel MIDI, nota per nota
-(nessuna fusione, nessuna modifica).
+Drums (is_drum tracks) are always excluded: they have no tuned pitch.
+All other notes are kept exactly as they are in the MIDI, note by note
+(no merging, no changes).
 
-USO:
+USAGE:
     python3 midi_to_visual.py  input.mid
-    python3 midi_to_visual.py  input.mid  --outdir cartella_output
+    python3 midi_to_visual.py  input.mid  --outdir output_folder
 
-Dipendenze:  pip install pretty_midi numpy soundfile
-Per ottenere anche un MP3 piu' leggero serve ffmpeg (opzionale).
+Dependencies:  pip install pretty_midi numpy soundfile
+ffmpeg is needed (optional) to also get a lighter MP3.
 
-NB: l'audio prodotto e' una sintesi di lavoro (onde semplici), utile per testare
-la sincronia. Per il video finale usa l'export audio reale dal tuo DAW/Sibelius,
-allineato allo stesso punto di partenza del MIDI.
+Note: the audio produced is a working synthesis (simple waves), useful for
+testing sync. For the final video use the real audio export from your
+DAW/Sibelius, aligned to the same starting point as the MIDI.
 """
 
 import argparse
@@ -30,14 +30,14 @@ try:
     import pretty_midi
     import soundfile as sf
 except ImportError:
-    sys.exit("Manca una dipendenza. Installa con:\n"
+    sys.exit("A dependency is missing. Install with:\n"
              "  pip install pretty_midi numpy soundfile")
 
 SR = 22050
 
 
 def extract_notes(inst):
-    """Tutte le note dello strumento, nota per nota, senza modifiche."""
+    """All the instrument's notes, note by note, unchanged."""
     out = []
     for n in sorted(inst.notes, key=lambda n: n.start):
         out.append({
@@ -50,8 +50,9 @@ def extract_notes(inst):
 
 
 def synth_events(events, total_len):
-    """Sintesi additiva con soft-limiter: pensata per reggere anche mix densi
-    (decine di note simultanee) senza saturare ne' schiacciare tutto sui picchi."""
+    """Additive synthesis with a soft limiter: designed to handle dense mixes too
+    (dozens of simultaneous notes) without clipping or squashing everything
+    against the peaks."""
     mix = np.zeros(total_len)
     for ev in events:
         freq = ev["freq"]
@@ -60,9 +61,9 @@ def synth_events(events, total_len):
         if n <= 0:
             continue
         t = np.arange(n) / SR
-        # onda morbida: fondamentale + poca 2a armonica (niente asprezza che si accumula)
+        # soft wave: fundamental + a little 2nd harmonic (no harshness building up)
         wave = np.sin(2 * np.pi * freq * t) + 0.15 * np.sin(2 * np.pi * 2 * freq * t)
-        # inviluppo: attacco breve, release lungo e morbido (le note si legano)
+        # envelope: short attack, long smooth release (notes blend into each other)
         atk = min(int(0.015 * SR), n // 2)
         rel = min(int(0.25 * SR), n - atk)
         env = np.ones(n)
@@ -71,12 +72,12 @@ def synth_events(events, total_len):
         if rel > 0:
             env[-rel:] = np.cos(np.linspace(0, np.pi / 2, rel))
         i0 = int(ev["time"] * SR)
-        # volume ridotto per voce, cosi' la somma di molte note non esplode
+        # reduced level per voice, so the sum of many notes does not blow up
         seg = wave * env * ev["amplitude"] * 0.25
         mix[i0:i0 + len(seg)] += seg
 
-    # soft-limiter (tanh): comprime dolcemente i picchi invece di tagliarli;
-    # evita che pochi istanti densi schiaccino il volume di tutto il resto.
+    # soft limiter (tanh): gently compresses peaks instead of clipping them,
+    # so a few dense moments do not squash the level of everything else.
     mix = np.tanh(mix * 0.6) / 0.6
     peak = np.max(np.abs(mix))
     if peak > 0:
@@ -86,8 +87,8 @@ def synth_events(events, total_len):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input", help="file MIDI (.mid) in ingresso")
-    ap.add_argument("--outdir", default=".", help="cartella di output (default: corrente)")
+    ap.add_argument("input", help="input MIDI file (.mid)")
+    ap.add_argument("--outdir", default=".", help="output folder (default: current)")
     args = ap.parse_args()
 
     pm = pretty_midi.PrettyMIDI(args.input)
@@ -95,19 +96,19 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
 
     all_events = []
-    print("Strumenti:")
+    print("Instruments:")
     for inst in pm.instruments:
         if inst.is_drum:
-            print(f"  - {inst.name or 'senza nome'}: ESCLUSO (batteria)")
+            print(f"  - {inst.name or 'unnamed'}: EXCLUDED (drums)")
             continue
         if not inst.notes:
             continue
         ev = extract_notes(inst)
         all_events.extend(ev)
-        print(f"  - {inst.name or 'senza nome'}: {len(ev)} note")
+        print(f"  - {inst.name or 'unnamed'}: {len(ev)} notes")
 
     if not all_events:
-        sys.exit("Nessuna nota melodica trovata nel MIDI.")
+        sys.exit("No pitched notes found in the MIDI file.")
 
     events = sorted(all_events, key=lambda e: e["time"])
     duration = float(pm.get_end_time())
@@ -121,7 +122,7 @@ def main():
     score_path = os.path.join(args.outdir, base + "_score.json")
     with open(score_path, "w") as f:
         json.dump(score, f, indent=2)
-    print(f"\nScore:  {score_path}  ({len(events)} eventi)")
+    print(f"\nScore:  {score_path}  ({len(events)} events)")
 
     total_len = int((duration + 1) * SR)
     mix = synth_events(events, total_len)
@@ -132,10 +133,10 @@ def main():
 
     mp3_path = os.path.join(args.outdir, base + "_audio.mp3")
     if os.system(f'ffmpeg -y -loglevel error -i "{wav_path}" -codec:a libmp3lame -qscale:a 4 "{mp3_path}"') == 0:
-        print(f"Audio:  {mp3_path}  (mp3 piu' leggero)")
+        print(f"Audio:  {mp3_path}  (lighter mp3)")
 
-    print("\nFatto. Carica lo _score.json e l'_audio nel visualizzatore.")
-    print("NB: l'audio e' una sintesi di lavoro; per il video finale usa l'export reale dal tuo DAW.")
+    print("\nDone. Load the _score.json and the _audio into the visualizer.")
+    print("Note: the audio is a working synthesis; for the final video use the real export from your DAW.")
 
 
 if __name__ == "__main__":
